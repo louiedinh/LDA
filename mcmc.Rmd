@@ -1,0 +1,236 @@
+---
+title: "MCMC"
+author: "Louie Dinh"
+date: "May 14, 2016"
+output: html_document
+---
+```{r echo=FALSE}
+library(MASS)
+```
+
+Now we examine the markov chain monte carlo algorithm. The Metropolis algorithm is a way to sample from a complex distribution or find it's expected value.
+
+Monte Carlo Integration
+=======================
+
+Let's see how we can use monte carlo methods for integration. 
+
+Approximate $$I = \int_0^1 x^3 dx = 1/4$$
+
+```{r}
+ANS = 1/4
+ncaught = 0
+nmissed = 0
+ests <- NULL
+for(i in 1:1000) { 
+  N <- 1000
+  xs <- runif(N, min=0, max=1)
+  samps <- xs^3
+  Ihat = (1/N) * sum(samps)
+  ests <- c(Ihat, ests)
+  se = sqrt(var(xs) / N)
+  
+  CI_top <- Ihat + qnorm(.95) * se
+  CI_bot <- Ihat - qnorm(.95) * se
+  
+  if(ANS > CI_bot & ANS < CI_top) {
+    ncaught <- ncaught + 1
+  } else {
+    nmissed <- nmissed + 1
+  }
+}
+
+hist(ests)
+```
+
+`r ncaught / (ncaught + nmissed)`% contained within the 95% confidence interval.
+
+Approximations: Ihat is approx. normal from CLT. SE uses approx. mean rather than true mean.
+
+Approximating Pi
+=================
+
+Now let's approximate pi.
+$$ I = \int_r^r \int_r^r Ind(x^2 + y^2 < r^2) dx dy $$
+
+First we transform the integral
+$$ I = \int_r^r \int_r^r Ind(x^2 + y^2 < r^2) dx dy = \int_r^r \int_r^r w(x,y)p(x,y)dxdy$$
+with
+$$
+w(x,y) = (b_x - a_x)(b_y - a_y) Ind(x^2 + y^2 < r^2)  = 4r^2 Ind(x^2 + y^2 < r^2) \\
+p(x,y) = 1 / (b_x - a_x) * 1 / (b_y - a_y)
+$$
+
+(x,y) can be drawn as independent samples from two different uniforms. We approximate the entire 
+integral with the sample mean similar to the above.
+```{r}
+N = 20000
+R = 2
+xs <- runif(N, -R, R)
+ys <- runif(N, -R, R)
+inds <- xs^2 + ys^2 < R^2
+est <- mean(4*R^2 * inds)
+```
+
+pi is approximately `r est / R^2`
+
+Metropolis Hastings
+===================
+
+Here is code or a generic Metropolis-Hastings Algorithm.
+Based on Kevin Murphy's implementation in Matlab.
+```{r}
+source("mh.R")
+```
+
+Run MH.
+```{r}
+# Setup our proposal and target distributions
+mog_density <- function(x, weights, mus, sigmas) {
+  x <- mapply(dnorm, x=rep(x, length(weights)), mean=mus, sd=sigmas) %*% weights
+  as.numeric(x)
+}
+
+# Mixture of gaussian
+target <- function(x, weights, mus, sigmas) {
+  mog_density(x, weights, mus, sigmas)
+}
+
+# Sample from gaussian
+proposal <- function(mu, sigma) {
+  rnorm(n=1, mean=mu, sd=sigma)
+}
+
+proposal_prob <- function(x, mu, sigma) {
+  dnorm(x, mean=mu, sd=sigma)
+}
+
+# Try sampling from a mixture of gaussians pi(x) = w1 * Normal(x, u1, sigma1) + w2 * Normal(x, u2, sigma2)
+# Proposal is a univariate gaussian q(x) = Normal(x', x, sigmap)
+weights = c(.3, .7)
+mus = c(0, 10)
+sigmas = c(2, 2)
+
+# Run our simulation
+N = 100
+x = numeric(N)
+sigma_prop = 10
+target_args = list(weights=weights, mus=mus, sigmas=sigmas)
+proposal_args = list(sigma=sigma_prop)
+xinit = rnorm(n=1)
+samples <- MH(target, proposal, xinit, N, target_args, proposal_args, proposal_prob)
+truehist(samples)
+x <- seq(-10, 20, length=1000)
+fx <- sapply(x, mog_density, weights=weights, mus=mus, sigmas=sigmas)
+lines(x, fx)
+
+# Surely we can do better than 100 samples
+N = 5000
+x = numeric(N)
+samples <- MH(target, proposal, xinit, N, target_args, proposal_args, proposal_prob)
+truehist(samples)
+x <- seq(-10, 20, length=1000)
+fx <- sapply(x, mog_density, weights=weights, mus=mus, sigmas=sigmas)
+lines(x, fx)
+```
+
+Now we deal with the case of a binomial distribution with a non-conjugate prior [Thanks KMurph + Brani Vidakovic].
+
+Let X=12 be drawn from a binomial with some parameter $\theta$ and N=20. We take the non-conjugate prior to be $Pr(\theta) \sim Unif(.5,1)$. That is to say, theta can only be greater than 0.5.
+
+$$
+Pr(X=12 | \theta, N) =  {N \choose X} \theta^X (1-\theta)^{N - X}\\
+Pr(\theta) = \mathcal{I}(0.5 \leq \theta \leq 1)\frac{1}{1-0.5}\\
+Pr(\theta | X,N) \propto \theta^X (1-\theta)^{N - X} \mathcal{I}(0.5 \leq \theta \leq 1)
+$$
+
+We can sample from a proposal distribution that has the same support (i.e [0.5, 1]), but it's easier to transform the support to $\mathbb{R}$ using the shifted logit transform.
+
+$$
+\phi = log \frac{\theta - 0.5}{1-\theta}\\
+\theta = \frac{e^\phi + .5}{1 + e^\phi}
+$$
+
+Using the Change Of Variables (https://onlinecourses.science.psu.edu/stat414/node/157), we use the formula with g(y) being the inverse transform from $\phi$ to $\theta$ and $f_x$ is the original density of $\theta$. We find the density of $\phi$ to be
+
+$$
+\pi(\phi) = f_x(g(y))\frac{dg(y)}{dy} \propto (\frac{e^\phi + .5}{1-e^\phi})^X (\frac{.5}{1-e^\phi})^{N-X} \frac{.5e^\phi}{(1 + e^\phi)^2}\\
+          \propto  \frac{(e^\phi + .5)^{12}e^\phi}{(1+e^\phi)^{22}}
+$$
+
+
+```{r}
+# Transform from our sampling space to our original parameter space.
+inverse_transform <- function(x) {
+  (exp(x) + .5) / (1 + exp(x))
+}
+
+# Mixture of gaussian
+target <- function(x) {
+  (exp(x) + .5)^12 * exp(x) / (1+exp(x))^22
+}
+
+# Sample from gaussian
+proposal <- function(mu, sigma) {
+  rnorm(n=1, mean=mu, sd=sigma)
+}
+
+proposal_prob <- function(x, mu, sigma) {
+  dnorm(x, mean=mu, sd=sigma)
+}
+
+# Run our simulation
+N = 20000
+x = numeric(N)
+sigma_prop = .5
+target_args = list()
+proposal_args = list(sigma=sigma_prop)
+xinit = rnorm(n=1)
+samples <- MH(target, proposal, xinit, N, target_args, proposal_args, proposal_prob)
+# Throw away first 2000 samples i.e burn in
+samples <- samples[2000:length(samples)]
+truehist(samples)
+# Transform samples back into theta space.
+inverse_samples <- inverse_transform(samples)
+truehist(inverse_samples, xlim=c(.4,1))
+# Plot the last few samples to see how well it's mixing
+plot(samples[length(inverse_samples)-500:length(inverse_samples)], type="l")
+plot(inverse_samples[length(inverse_samples)-500:length(inverse_samples)], type="l")
+
+# Run our simulation
+N = 20000
+x = numeric(N)
+sigma_prop = 100
+target_args = list()
+proposal_args = list(sigma=sigma_prop)
+xinit = rnorm(n=1)
+samples <- MH(target, proposal, xinit, N, target_args, proposal_args, proposal_prob)
+# Throw away first 2000 samples i.e burn in
+samples <- samples[2000:length(samples)]
+truehist(samples)
+# Transform samples back into theta space.
+inverse_samples <- inverse_transform(samples)
+truehist(inverse_samples, xlim=c(.4,1))
+# Plot the last few samples to see how well it's mixing
+plot(samples[length(inverse_samples)-500:length(inverse_samples)], type="l")
+plot(inverse_samples[length(inverse_samples)-500:length(inverse_samples)], type="l")
+```
+
+Gibbs Sampling
+==============
+
+If we know the form of the posterior, and need to sample from a complicated joint, with simple conditionals, then we can use Gibb's sampling instead. This is a special case of the MH algorithm where every sample is accepted.
+
+Proof that all samples get accepted
+------------------------------------
+First we define some terminology. Let the proposal distribution $q_k(z'|z) = p(z_k'|z_{-k})$, be the probabilit of transitioning from  state z' to state z, where the difference is only at position k. We define this as sampling from the marginal with the other elements (denoted -k) fixed.Notice that $z_{-k}' = z_{-k}$ since we arn't updating any of those positions. Also $p(z) = p(z_k|z_{-k}) * p(z_{-k})$, by the laws of probability.
+
+Looking at the acceptance expression of the MH algorithm we have:
+$$
+A(z',z) = \frac{p(z')q_k(z|z')}{p(z)q_k(z'|z)} 
+        = \frac{p(z_k'|z_{-k}')p(z_{-k}')p(z_k|z_{-k})}{p(z_k|z_{-k})p(z_{-k})p(z_k'|z_{-k})} = 1
+$$
+
+Furthermore, we know that the conditional probability is invariant between transitions since the $z_{-k}$ remains the same. In addition, the marginal p(z{-k}) is invariant since it doesn't change between transition steps. Thus the joint is invariant.
+
+Another condition is to check that all joint states can be reached within a finite amount of time. It is sufficient for all conditional distributions to be nonzero everywhere.

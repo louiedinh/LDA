@@ -1,0 +1,22 @@
+Goal of this etude is to create a series of notebooks about fitting LDA.
+
+Ability Delta:
+- Can use topic modeling for document clustering, browsing and filtering.
+- Understand how PERT works.
+- Can use approximate posterior inference for complex Bayesian models.
+
+Plan:
+ 1) Monte Carlo Methods
+    Bishop - Monte Carlo Methods
+ 2) MCMC + Gibb's Sampling
+ 3) Mixture Models and EM
+ 4) Variational Methods
+ 5) Fitting LDA
+
+Resources:
+    Bishop - ML and Pattern Recognition 
+    Murphy - MLAPP
+    Wasserman - AOS
+
+Web Resources:
+http://www.math.uah.edu/stat/dist/index.html
